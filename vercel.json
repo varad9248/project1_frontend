@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/fetch-weather?secret=${process.env.CRON_SECRET_TOKEN}",
+      "schedule": "0 1 * * *"
+    }
+  ]
+}
