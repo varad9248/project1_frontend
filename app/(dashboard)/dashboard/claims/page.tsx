@@ -1,15 +1,15 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import { useAuthStore } from '@/lib/store';
+import { useEffect, useState, useCallback } from "react";
+import { supabase } from "@/lib/supabase";
+import { useAuthStore } from "@/lib/store";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@/components/ui/card';
+} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -17,15 +17,23 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { AlertCircle, CheckCircle, XCircle, Banknote, Search, Eye } from 'lucide-react';
-import { motion } from 'framer-motion';
-import { format } from 'date-fns';
-import { toast } from 'sonner';
-import { ClaimDetailsModal } from '@/components/claims/ClaimDetailsModal';
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  AlertCircle,
+  CheckCircle,
+  XCircle,
+  Banknote,
+  Search,
+  Eye,
+  Loader2,
+} from "lucide-react";
+import { motion } from "framer-motion";
+import { format } from "date-fns";
+import { toast } from "sonner";
+import { ClaimDetailsModal } from "@/components/claims/ClaimDetailsModal";
 
 interface ClaimWithDetails {
   id: string;
@@ -49,52 +57,85 @@ export default function ClaimsPage() {
   const [claims, setClaims] = useState<ClaimWithDetails[]>([]);
   const [filteredClaims, setFilteredClaims] = useState<ClaimWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [updatingClaimId, setUpdatingClaimId] = useState<string | null>(null);
-  const [selectedClaim, setSelectedClaim] = useState<ClaimWithDetails | null>(null);
+  const [selectedClaim, setSelectedClaim] = useState<ClaimWithDetails | null>(
+    null
+  );
   const { user } = useAuthStore();
 
-  useEffect(() => {
-    loadClaims();
-    const channel = supabase
-      .channel('claims-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'claims' }, () => {
-        loadClaims();
-      })
-      .subscribe();
+  // Priority mapping for sorting claims
+  const priorityOrder: Record<string, number> = {
+    Pending: 1,
+    Approved: 2,
+    Paid: 3,
+    Rejected: 4,
+  };
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
-  useEffect(() => {
-    filterClaims();
-  }, [searchTerm, claims]);
-
-  const loadClaims = async () => {
+  const loadClaims = useCallback(async () => {
+    setLoading(true);
     try {
       const { data, error } = await supabase
-        .from('claims')
-        .select(`
+        .from("claims")
+        .select(
+          `
           *,
           user_policies!inner (
             user_profiles!user_policies_user_id_fkey (full_name, email),
             policy_products (name)
           )
-        `)
-        .order('triggered_at', { ascending: false });
+        `
+        )
+        .order("triggered_at", { ascending: false });
 
       if (error) throw error;
-      setClaims(data || []);
+
+      // Sort by priority (Pending -> Approved -> Paid -> Rejected)
+      const sortedData = (data || []).sort(
+        (a, b) => priorityOrder[a.status] - priorityOrder[b.status]
+      );
+
+      setClaims(sortedData);
+      setFilteredClaims(sortedData);
     } catch (error) {
-      console.error('Failed to load claims:', error);
+      console.error("Failed to load claims:", error);
+      toast.error("Failed to load claims");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const filterClaims = () => {
+  // Initial load + Supabase real-time subscription
+  useEffect(() => {
+    loadClaims();
+
+    const channel = supabase
+      .channel("claims-changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "claims" },
+        () => {
+          loadClaims();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadClaims]);
+
+  // 🔁 Refetch on tab focus
+  useEffect(() => {
+    const handleFocus = () => {
+      loadClaims();
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [loadClaims]);
+
+  // 🔍 Filter claims by search term
+  useEffect(() => {
     let filtered = [...claims];
     if (searchTerm) {
       filtered = filtered.filter(
@@ -108,13 +149,20 @@ export default function ClaimsPage() {
           c.reason.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
+    // Maintain priority sort after filtering
+    filtered.sort((a, b) => priorityOrder[a.status] - priorityOrder[b.status]);
     setFilteredClaims(filtered);
-  };
+  }, [searchTerm, claims]);
 
-  const updateClaimStatus = async (claimId: string, newStatus: string, payoutRef?: string) => {
+  // 🧩 Update claim status
+  const updateClaimStatus = async (
+    claimId: string,
+    newStatus: string,
+    payoutRef?: string
+  ) => {
     setUpdatingClaimId(claimId);
     try {
-      const { error } = await supabase.rpc('handle_claim_update', {
+      const { error } = await supabase.rpc("handle_claim_update", {
         _claim_id: claimId,
         _new_status: newStatus,
         _reviewer_id: user?.id,
@@ -122,33 +170,42 @@ export default function ClaimsPage() {
       });
 
       if (error) throw error;
+
       toast.success(`Claim ${newStatus.toLowerCase()} successfully`);
+
+      // ⚡ Quick reload after operation
+      await loadClaims();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to update claim');
+      toast.error(error.message || "Failed to update claim");
     } finally {
       setUpdatingClaimId(null);
     }
   };
 
-  const handleApprove = (claimId: string) => updateClaimStatus(claimId, 'Approved');
-  const handleReject = (claimId: string) => updateClaimStatus(claimId, 'Rejected');
+  const handleApprove = (claimId: string) =>
+    updateClaimStatus(claimId, "Approved");
+  const handleReject = (claimId: string) =>
+    updateClaimStatus(claimId, "Rejected");
   const handlePay = (claimId: string) => {
-    const payoutRef = `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
-    updateClaimStatus(claimId, 'Paid', payoutRef);
+    const payoutRef = `PAY-${Date.now()}-${Math.random()
+      .toString(36)
+      .substr(2, 9)
+      .toUpperCase()}`;
+    updateClaimStatus(claimId, "Paid", payoutRef);
   };
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
-      case 'paid':
-        return 'bg-emerald-100 text-emerald-800';
-      case 'approved':
-        return 'bg-blue-100 text-blue-800';
-      case 'pending':
-        return 'bg-amber-100 text-amber-800';
-      case 'rejected':
-        return 'bg-red-100 text-red-800';
+      case "paid":
+        return "bg-emerald-100 text-emerald-800";
+      case "approved":
+        return "bg-blue-100 text-blue-800";
+      case "pending":
+        return "bg-amber-100 text-amber-800";
+      case "rejected":
+        return "bg-red-100 text-red-800";
       default:
-        return 'bg-slate-100 text-slate-800';
+        return "bg-slate-100 text-slate-800";
     }
   };
 
@@ -160,11 +217,17 @@ export default function ClaimsPage() {
             <AlertCircle className="h-8 w-8 text-amber-600" />
             Claims Management
           </h1>
-          <p className="text-slate-600 mt-1">Review and process insurance claims</p>
+          <p className="text-slate-600 mt-1">
+            Review and process insurance claims
+          </p>
         </div>
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+      >
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle>All Claims</CardTitle>
@@ -201,28 +264,50 @@ export default function ClaimsPage() {
                   <TableBody>
                     {loading ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8 text-slate-500">
+                        <TableCell
+                          colSpan={8}
+                          className="text-center py-8 text-slate-500"
+                        >
+                          <Loader2 className="h-5 w-5 animate-spin inline mr-2" />
                           Loading claims...
                         </TableCell>
                       </TableRow>
                     ) : filteredClaims.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8 text-slate-500">
+                        <TableCell
+                          colSpan={8}
+                          className="text-center py-8 text-slate-500"
+                        >
                           No claims found
                         </TableCell>
                       </TableRow>
                     ) : (
                       filteredClaims.map((claim) => (
                         <TableRow key={claim.id}>
-                          <TableCell>{claim.user_policies.user_profiles.full_name}</TableCell>
-                          <TableCell>{claim.user_policies.policy_products.name}</TableCell>
-                          <TableCell>{claim.reason}</TableCell>
-                          <TableCell>₹{claim.amount_claimed.toLocaleString()}</TableCell>
-                          <TableCell>{format(new Date(claim.triggered_at), 'MMM dd, yyyy HH:mm')}</TableCell>
                           <TableCell>
-                            <Badge className={getStatusColor(claim.status)}>{claim.status}</Badge>
+                            {claim.user_policies.user_profiles.full_name}
                           </TableCell>
-                          <TableCell>{claim.payout_reference_id || '-'}</TableCell>
+                          <TableCell>
+                            {claim.user_policies.policy_products.name}
+                          </TableCell>
+                          <TableCell>{claim.reason}</TableCell>
+                          <TableCell>
+                            ₹{claim.amount_claimed.toLocaleString()}
+                          </TableCell>
+                          <TableCell>
+                            {format(
+                              new Date(claim.triggered_at),
+                              "MMM dd, yyyy HH:mm"
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge className={getStatusColor(claim.status)}>
+                              {claim.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {claim.payout_reference_id || "-"}
+                          </TableCell>
                           <TableCell>
                             <div className="flex gap-1">
                               <Button
@@ -234,7 +319,7 @@ export default function ClaimsPage() {
                                 <Eye className="h-4 w-4" />
                               </Button>
 
-                              {claim.status === 'Pending' && (
+                              {claim.status === "Pending" && (
                                 <>
                                   <Button
                                     variant="ghost"
@@ -243,8 +328,13 @@ export default function ClaimsPage() {
                                     disabled={updatingClaimId === claim.id}
                                     className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
                                   >
-                                    <CheckCircle className="h-4 w-4" />
+                                    {updatingClaimId === claim.id ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <CheckCircle className="h-4 w-4" />
+                                    )}
                                   </Button>
+
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -252,12 +342,16 @@ export default function ClaimsPage() {
                                     disabled={updatingClaimId === claim.id}
                                     className="text-red-600 hover:text-red-700 hover:bg-red-50"
                                   >
-                                    <XCircle className="h-4 w-4" />
+                                    {updatingClaimId === claim.id ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <XCircle className="h-4 w-4" />
+                                    )}
                                   </Button>
                                 </>
                               )}
 
-                              {claim.status === 'Approved' && (
+                              {claim.status === "Approved" && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -265,7 +359,11 @@ export default function ClaimsPage() {
                                   disabled={updatingClaimId === claim.id}
                                   className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                                 >
-                                  <Banknote className="h-4 w-4" />
+                                  {updatingClaimId === claim.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Banknote className="h-4 w-4" />
+                                  )}
                                 </Button>
                               )}
                             </div>
@@ -281,7 +379,12 @@ export default function ClaimsPage() {
         </Card>
       </motion.div>
 
-      {selectedClaim && <ClaimDetailsModal claim={selectedClaim} onClose={() => setSelectedClaim(null)} />}
+      {selectedClaim && (
+        <ClaimDetailsModal
+          claim={selectedClaim}
+          onClose={() => setSelectedClaim(null)}
+        />
+      )}
     </div>
   );
 }

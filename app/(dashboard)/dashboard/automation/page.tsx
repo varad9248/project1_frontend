@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { weatherService } from '@/lib/weather';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -36,55 +36,25 @@ export default function AutomationPage() {
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<AutomationResult | null>(null);
 
-  useEffect(() => {
-    loadWeatherData();
-  }, []);
-
-  const loadWeatherData = async () => {
-    try {
-      const data = await weatherService.getAllRecentWeatherObservations(20);
-      setWeatherData(data as any);
-    } catch (error) {
-      console.error('Failed to load weather data:', error);
-      toast.error('Failed to load weather data');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const runClaimCheck = async () => {
-    setRunning(true);
-    try {
-      const result = await weatherService.runAutomatedClaimCheck();
-      setLastRun(result);
-      toast.success(`Automation completed: ${result.claims_created} claims created`);
-      
-      // Reload weather data to show updated status
-      await loadWeatherData();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to run automation');
-      setLastRun({
-        success: false,
-        claims_created: 0,
-        timestamp: new Date().toISOString(),
-      });
-    } finally {
-      setRunning(false);
-    }
-  };
-
   const getWeatherAlert = (observation: WeatherData) => {
     const alerts = [];
-    if (observation.rainfall_mm < 10) {
-      alerts.push({ type: 'Low Rainfall', severity: 'warning' });
-    }
     if (observation.temperature_c > 40) {
       alerts.push({ type: 'High Temperature', severity: 'danger' });
+    }
+    if (observation.rainfall_mm < 10) {
+      alerts.push({ type: 'Low Rainfall', severity: 'warning' });
     }
     if (observation.humidity < 30) {
       alerts.push({ type: 'Low Humidity', severity: 'info' });
     }
     return alerts;
+  };
+
+  const getAlertPriority = (alerts: { severity: string }[]) => {
+    if (alerts.some(a => a.severity === 'danger')) return 1;
+    if (alerts.some(a => a.severity === 'warning')) return 2;
+    if (alerts.some(a => a.severity === 'info')) return 3;
+    return 4; // normal
   };
 
   const getAlertColor = (severity: string) => {
@@ -100,6 +70,56 @@ export default function AutomationPage() {
     }
   };
 
+  const loadWeatherData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await weatherService.getAllRecentWeatherObservations(20);
+      const sorted = [...(data as WeatherData[])].sort((a, b) => {
+        const aAlerts = getWeatherAlert(a);
+        const bAlerts = getWeatherAlert(b);
+        return getAlertPriority(aAlerts) - getAlertPriority(bAlerts);
+      });
+      setWeatherData(sorted);
+    } catch (error) {
+      console.error('Failed to load weather data:', error);
+      toast.error('Failed to load weather data');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadWeatherData();
+  }, [loadWeatherData]);
+
+  // Refetch data when tab is focused or page loads
+  useEffect(() => {
+    const handleFocus = () => loadWeatherData();
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [loadWeatherData]);
+
+  const runClaimCheck = async () => {
+    setRunning(true);
+    try {
+      const result = await weatherService.runAutomatedClaimCheck();
+      setLastRun(result);
+      toast.success(`Automation completed: ${result.claims_created} claims created`);
+
+      // 🔄 Reload and show results quickly
+      await loadWeatherData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to run automation');
+      setLastRun({
+        success: false,
+        claims_created: 0,
+        timestamp: new Date().toISOString(),
+      });
+    } finally {
+      setRunning(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -112,26 +132,16 @@ export default function AutomationPage() {
         </div>
       </div>
 
+      {/* --- Claim Trigger Section --- */}
       <div className="grid gap-6 md:grid-cols-2">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-        >
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
           <Card className="shadow-lg border-l-4 border-l-blue-500">
             <CardHeader>
               <CardTitle>Automated Claim Trigger</CardTitle>
-              <CardDescription>
-                Run claim checks based on weather conditions
-              </CardDescription>
+              <CardDescription>Run claim checks based on weather conditions</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Button
-                onClick={runClaimCheck}
-                disabled={running}
-                className="w-full bg-blue-600 hover:bg-blue-700"
-                size="lg"
-              >
+              <Button onClick={runClaimCheck} disabled={running} className="w-full bg-blue-600 hover:bg-blue-700" size="lg">
                 {running ? (
                   <>
                     <Loader2 className="mr-2 h-5 w-5 animate-spin" />
@@ -159,9 +169,7 @@ export default function AutomationPage() {
                       <span className="text-slate-600">Claims Created:</span>{' '}
                       <span className="font-semibold">{lastRun.claims_created}</span>
                     </p>
-                    <p className="text-slate-600">
-                      {format(new Date(lastRun.timestamp), 'MMM dd, yyyy HH:mm:ss')}
-                    </p>
+                    <p className="text-slate-600">{format(new Date(lastRun.timestamp), 'MMM dd, yyyy HH:mm:ss')}</p>
                   </div>
                 </div>
               )}
@@ -169,11 +177,8 @@ export default function AutomationPage() {
           </Card>
         </motion.div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.1 }}
-        >
+        {/* --- Weather Thresholds --- */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }}>
           <Card className="shadow-lg">
             <CardHeader>
               <CardTitle>Weather Thresholds</CardTitle>
@@ -208,15 +213,12 @@ export default function AutomationPage() {
         </motion.div>
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.2 }}
-      >
+      {/* --- Weather Table --- */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.2 }}>
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle>Recent Weather Observations</CardTitle>
-            <CardDescription>Latest 20 weather readings from all farms</CardDescription>
+            <CardDescription>Latest 20 weather readings from all farms (sorted by priority)</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="rounded-md border">
@@ -250,13 +252,9 @@ export default function AutomationPage() {
                       const alerts = getWeatherAlert(observation);
                       return (
                         <TableRow key={observation.id}>
-                          <TableCell className="font-medium">
-                            {observation.farm_profiles.farm_name}
-                          </TableCell>
+                          <TableCell className="font-medium">{observation.farm_profiles.farm_name}</TableCell>
                           <TableCell>{observation.farm_profiles.location}</TableCell>
-                          <TableCell>
-                            {format(new Date(observation.timestamp), 'MMM dd, HH:mm')}
-                          </TableCell>
+                          <TableCell>{format(new Date(observation.timestamp), 'MMM dd, HH:mm')}</TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
                               {observation.rainfall_mm < 10 ? (
@@ -269,10 +267,8 @@ export default function AutomationPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
-                              {observation.temperature_c > 40 ? (
+                              {observation.temperature_c > 40 && (
                                 <TrendingUp className="h-4 w-4 text-red-600" />
-                              ) : (
-                                <span className="w-4" />
                               )}
                               <span>{observation.temperature_c.toFixed(1)}°C</span>
                             </div>
@@ -282,17 +278,12 @@ export default function AutomationPage() {
                             <div className="flex flex-wrap gap-1">
                               {alerts.length > 0 ? (
                                 alerts.map((alert, idx) => (
-                                  <Badge
-                                    key={idx}
-                                    className={getAlertColor(alert.severity)}
-                                  >
+                                  <Badge key={idx} className={getAlertColor(alert.severity)}>
                                     {alert.type}
                                   </Badge>
                                 ))
                               ) : (
-                                <Badge className="bg-emerald-100 text-emerald-800">
-                                  Normal
-                                </Badge>
+                                <Badge className="bg-emerald-100 text-emerald-800">Normal</Badge>
                               )}
                             </div>
                           </TableCell>

@@ -95,11 +95,22 @@ export default function SettingsPage() {
     }
   };
 
+  function generateRandomId(length = 10) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     try {
       const policyData = {
+        id : generateRandomId(12),
         name: formData.name,
         description: formData.description,
         crop_type: formData.crop_type,

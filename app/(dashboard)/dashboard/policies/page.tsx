@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   Card,
@@ -58,24 +58,16 @@ export default function PoliciesPage() {
   const [paymentFilter, setPaymentFilter] = useState("all");
   const [claimFilter, setClaimFilter] = useState("all");
 
-  useEffect(() => {
-    loadPolicies();
-  }, []);
-
-  useEffect(() => {
-    filterPolicies();
-  }, [searchTerm, paymentFilter, claimFilter, policies]);
-
-  const loadPolicies = async () => {
+  const loadPolicies = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from("user_policies")
         .select(
           `
-          *,
-          user_profiles!user_policies_user_id_fkey (full_name, email),
-          policy_products (name, crop_type)
-        `
+ 			*,
+ 			user_profiles!user_policies_user_id_fkey (full_name, email),
+ 			policy_products (name, crop_type)
+ 		  `
         )
         .order("purchase_date", { ascending: false });
 
@@ -86,7 +78,26 @@ export default function PoliciesPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadPolicies();
+  }, [loadPolicies]);
+
+  // Refetch data on window focus
+  useEffect(() => {
+    const handleFocus = () => {
+      loadPolicies();
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [loadPolicies]);
+
+  useEffect(() => {
+    filterPolicies();
+  }, [searchTerm, paymentFilter, claimFilter, policies]);
 
   const filterPolicies = () => {
     let filtered = [...policies];

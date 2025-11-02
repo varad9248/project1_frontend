@@ -22,10 +22,9 @@ export async function GET(request: Request) {
   // --- 1. Get All Secrets (MUST be set in your Vercel/deployment) ---
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // Use Service Key for admin access
-  const weatherApiKey = process.env.OPENWEATHER_API_KEY;
   const cronSecret = process.env.CRON_SECRET_TOKEN; // A secret password you create
 
-  if (!supabaseUrl || !serviceKey || !weatherApiKey || !cronSecret) {
+  if (!supabaseUrl || !serviceKey || !cronSecret) {
     return NextResponse.json(
       { error: "Missing environment variables" },
       { status: 500 }
