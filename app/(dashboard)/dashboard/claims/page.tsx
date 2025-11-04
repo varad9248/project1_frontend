@@ -35,6 +35,17 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import { ClaimDetailsModal } from "@/components/claims/ClaimDetailsModal";
 
+// ✅ Import Shadcn dialog components
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+
 interface ClaimWithDetails {
   id: string;
   triggered_at: string;
@@ -42,6 +53,7 @@ interface ClaimWithDetails {
   amount_claimed: number;
   status: string;
   payout_reference_id: string | null;
+  rejection_reason: string | null;
   user_policies: {
     user_profiles: {
       full_name: string;
@@ -59,12 +71,15 @@ export default function ClaimsPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [updatingClaimId, setUpdatingClaimId] = useState<string | null>(null);
-  const [selectedClaim, setSelectedClaim] = useState<ClaimWithDetails | null>(
-    null
-  );
+  const [selectedClaim, setSelectedClaim] = useState<ClaimWithDetails | null>(null);
+
+  // ✅ Modal states
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectingClaimId, setRejectingClaimId] = useState<string | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+
   const { user } = useAuthStore();
 
-  // Priority mapping for sorting claims
   const priorityOrder: Record<string, number> = {
     Pending: 1,
     Approved: 2,
@@ -90,13 +105,12 @@ export default function ClaimsPage() {
 
       if (error) throw error;
 
-      // Sort by priority (Pending -> Approved -> Paid -> Rejected)
       const sortedData = (data || []).sort(
         (a, b) => priorityOrder[a.status] - priorityOrder[b.status]
       );
 
-      setClaims(sortedData);
-      setFilteredClaims(sortedData);
+      setClaims(sortedData as ClaimWithDetails[]);
+      setFilteredClaims(sortedData as ClaimWithDetails[]);
     } catch (error) {
       console.error("Failed to load claims:", error);
       toast.error("Failed to load claims");
@@ -105,7 +119,6 @@ export default function ClaimsPage() {
     }
   }, []);
 
-  // Initial load + Supabase real-time subscription
   useEffect(() => {
     loadClaims();
 
@@ -125,7 +138,6 @@ export default function ClaimsPage() {
     };
   }, [loadClaims]);
 
-  // 🔁 Refetch on tab focus
   useEffect(() => {
     const handleFocus = () => {
       loadClaims();
@@ -134,7 +146,6 @@ export default function ClaimsPage() {
     return () => window.removeEventListener("focus", handleFocus);
   }, [loadClaims]);
 
-  // 🔍 Filter claims by search term
   useEffect(() => {
     let filtered = [...claims];
     if (searchTerm) {
@@ -149,16 +160,14 @@ export default function ClaimsPage() {
           c.reason.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
-    // Maintain priority sort after filtering
     filtered.sort((a, b) => priorityOrder[a.status] - priorityOrder[b.status]);
     setFilteredClaims(filtered);
   }, [searchTerm, claims]);
 
-  // 🧩 Update claim status
   const updateClaimStatus = async (
     claimId: string,
     newStatus: string,
-    payoutRef?: string
+    details: { payoutRef?: string; rejectionReason?: string } = {}
   ) => {
     setUpdatingClaimId(claimId);
     try {
@@ -166,14 +175,13 @@ export default function ClaimsPage() {
         _claim_id: claimId,
         _new_status: newStatus,
         _reviewer_id: user?.id,
-        _payout_ref: payoutRef || null,
+        _payout_ref: details.payoutRef || null,
+        _rejection_reason: details.rejectionReason || null,
       });
 
       if (error) throw error;
 
       toast.success(`Claim ${newStatus.toLowerCase()} successfully`);
-
-      // ⚡ Quick reload after operation
       await loadClaims();
     } catch (error: any) {
       toast.error(error.message || "Failed to update claim");
@@ -182,16 +190,37 @@ export default function ClaimsPage() {
     }
   };
 
-  const handleApprove = (claimId: string) =>
-    updateClaimStatus(claimId, "Approved");
-  const handleReject = (claimId: string) =>
-    updateClaimStatus(claimId, "Rejected");
+  const handleApprove = (claimId: string) => updateClaimStatus(claimId, "Approved");
+
+  // ✅ Open modal instead of prompt
+  const openRejectModal = (claimId: string) => {
+    setRejectingClaimId(claimId);
+    setRejectionReason("");
+    setRejectModalOpen(true);
+  };
+
+  // ✅ Confirm rejection
+  const confirmReject = async () => {
+    if (!rejectionReason.trim()) {
+      toast.error("Rejection reason is required.");
+      return;
+    }
+    if (rejectingClaimId) {
+      await updateClaimStatus(rejectingClaimId, "Rejected", {
+        rejectionReason: rejectionReason.trim(),
+      });
+    }
+    setRejectModalOpen(false);
+    setRejectingClaimId(null);
+    setRejectionReason("");
+  };
+
   const handlePay = (claimId: string) => {
     const payoutRef = `PAY-${Date.now()}-${Math.random()
       .toString(36)
       .substr(2, 9)
       .toUpperCase()}`;
-    updateClaimStatus(claimId, "Paid", payoutRef);
+    updateClaimStatus(claimId, "Paid", { payoutRef });
   };
 
   const getStatusColor = (status: string) => {
@@ -264,20 +293,14 @@ export default function ClaimsPage() {
                   <TableBody>
                     {loading ? (
                       <TableRow>
-                        <TableCell
-                          colSpan={8}
-                          className="text-center py-8 text-slate-500"
-                        >
+                        <TableCell colSpan={8} className="text-center py-8 text-slate-500">
                           <Loader2 className="h-5 w-5 animate-spin inline mr-2" />
                           Loading claims...
                         </TableCell>
                       </TableRow>
                     ) : filteredClaims.length === 0 ? (
                       <TableRow>
-                        <TableCell
-                          colSpan={8}
-                          className="text-center py-8 text-slate-500"
-                        >
+                        <TableCell colSpan={8} className="text-center py-8 text-slate-500">
                           No claims found
                         </TableCell>
                       </TableRow>
@@ -291,19 +314,22 @@ export default function ClaimsPage() {
                             {claim.user_policies.policy_products.name}
                           </TableCell>
                           <TableCell>{claim.reason}</TableCell>
+                          <TableCell>₹{claim.amount_claimed.toLocaleString()}</TableCell>
                           <TableCell>
-                            ₹{claim.amount_claimed.toLocaleString()}
-                          </TableCell>
-                          <TableCell>
-                            {format(
-                              new Date(claim.triggered_at),
-                              "MMM dd, yyyy HH:mm"
-                            )}
+                            {format(new Date(claim.triggered_at), "MMM dd, yyyy HH:mm")}
                           </TableCell>
                           <TableCell>
                             <Badge className={getStatusColor(claim.status)}>
                               {claim.status}
                             </Badge>
+                            {claim.status === "Rejected" && claim.rejection_reason && (
+                              <p
+                                className="text-xs text-red-600 mt-1 max-w-[150px] truncate"
+                                title={claim.rejection_reason}
+                              >
+                                {claim.rejection_reason}
+                              </p>
+                            )}
                           </TableCell>
                           <TableCell>
                             {claim.payout_reference_id || "-"}
@@ -338,15 +364,11 @@ export default function ClaimsPage() {
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => handleReject(claim.id)}
+                                    onClick={() => openRejectModal(claim.id)}
                                     disabled={updatingClaimId === claim.id}
                                     className="text-red-600 hover:text-red-700 hover:bg-red-50"
                                   >
-                                    {updatingClaimId === claim.id ? (
-                                      <Loader2 className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                      <XCircle className="h-4 w-4" />
-                                    )}
+                                    <XCircle className="h-4 w-4" />
                                   </Button>
                                 </>
                               )}
@@ -378,6 +400,40 @@ export default function ClaimsPage() {
           </CardContent>
         </Card>
       </motion.div>
+
+      {/* ✅ Reject Reason Modal */}
+      <Dialog open={rejectModalOpen} onOpenChange={setRejectModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject Claim</DialogTitle>
+            <DialogDescription>
+              Please provide a reason for rejecting this claim.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={rejectionReason}
+            onChange={(e) => setRejectionReason(e.target.value)}
+            placeholder="Enter rejection reason..."
+            className="min-h-[100px]"
+          />
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setRejectModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmReject}
+              disabled={!rejectionReason.trim() || updatingClaimId === rejectingClaimId}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {updatingClaimId === rejectingClaimId ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Confirm Reject"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {selectedClaim && (
         <ClaimDetailsModal

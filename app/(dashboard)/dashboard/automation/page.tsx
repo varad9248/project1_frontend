@@ -6,7 +6,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { CloudRain, Play, Loader2, TrendingDown, TrendingUp, Thermometer, Droplets } from 'lucide-react';
+import {
+  CloudRain,
+  Play,
+  Loader2,
+  TrendingDown,
+  TrendingUp,
+} from 'lucide-react';
 import { motion } from 'framer-motion';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -38,15 +44,9 @@ export default function AutomationPage() {
 
   const getWeatherAlert = (observation: WeatherData) => {
     const alerts = [];
-    if (observation.temperature_c > 40) {
-      alerts.push({ type: 'High Temperature', severity: 'danger' });
-    }
-    if (observation.rainfall_mm < 10) {
-      alerts.push({ type: 'Low Rainfall', severity: 'warning' });
-    }
-    if (observation.humidity < 30) {
-      alerts.push({ type: 'Low Humidity', severity: 'info' });
-    }
+    if (observation.temperature_c > 40) alerts.push({ type: 'High Temperature', severity: 'danger' });
+    if (observation.rainfall_mm < 10) alerts.push({ type: 'Low Rainfall', severity: 'warning' });
+    if (observation.humidity < 30) alerts.push({ type: 'Low Humidity', severity: 'info' });
     return alerts;
   };
 
@@ -54,7 +54,7 @@ export default function AutomationPage() {
     if (alerts.some(a => a.severity === 'danger')) return 1;
     if (alerts.some(a => a.severity === 'warning')) return 2;
     if (alerts.some(a => a.severity === 'info')) return 3;
-    return 4; // normal
+    return 4;
   };
 
   const getAlertColor = (severity: string) => {
@@ -92,7 +92,6 @@ export default function AutomationPage() {
     loadWeatherData();
   }, [loadWeatherData]);
 
-  // Refetch data when tab is focused or page loads
   useEffect(() => {
     const handleFocus = () => loadWeatherData();
     window.addEventListener('focus', handleFocus);
@@ -105,8 +104,6 @@ export default function AutomationPage() {
       const result = await weatherService.runAutomatedClaimCheck();
       setLastRun(result);
       toast.success(`Automation completed: ${result.claims_created} claims created`);
-
-      // 🔄 Reload and show results quickly
       await loadWeatherData();
     } catch (error: any) {
       toast.error(error.message || 'Failed to run automation');
@@ -122,103 +119,98 @@ export default function AutomationPage() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-2">
             <CloudRain className="h-8 w-8 text-blue-600" />
             Automation Monitor
           </h1>
-          <p className="text-slate-600 mt-1">Monitor weather data and trigger automated claims</p>
+          <p className="text-slate-600 mt-1">
+            Monitor weather data and trigger automated claims
+          </p>
         </div>
       </div>
 
-      {/* --- Claim Trigger Section --- */}
-      <div className="grid gap-6 md:grid-cols-2">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-          <Card className="shadow-lg border-l-4 border-l-blue-500">
-            <CardHeader>
-              <CardTitle>Automated Claim Trigger</CardTitle>
-              <CardDescription>Run claim checks based on weather conditions</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Button onClick={runClaimCheck} disabled={running} className="w-full bg-blue-600 hover:bg-blue-700" size="lg">
-                {running ? (
-                  <>
-                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                    Running Checks...
-                  </>
-                ) : (
-                  <>
-                    <Play className="mr-2 h-5 w-5" />
-                    Run Claim Check
-                  </>
-                )}
-              </Button>
-
-              {lastRun && (
-                <div className="p-4 rounded-lg bg-slate-50 border">
-                  <h4 className="font-semibold text-sm text-slate-700 mb-2">Last Run</h4>
-                  <div className="space-y-1 text-sm">
-                    <p>
-                      <span className="text-slate-600">Status:</span>{' '}
-                      <Badge className={lastRun.success ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}>
-                        {lastRun.success ? 'Success' : 'Failed'}
-                      </Badge>
-                    </p>
-                    <p>
-                      <span className="text-slate-600">Claims Created:</span>{' '}
-                      <span className="font-semibold">{lastRun.claims_created}</span>
-                    </p>
-                    <p className="text-slate-600">{format(new Date(lastRun.timestamp), 'MMM dd, yyyy HH:mm:ss')}</p>
-                  </div>
-                </div>
+      {/* --- Claim Trigger Section (Full Width) --- */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+      >
+        <Card className="shadow-lg border-l-4 border-l-blue-500">
+          <CardHeader>
+            <CardTitle>Automated Claim Trigger</CardTitle>
+            <CardDescription>
+              Run claim checks based on recent weather conditions
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Button
+              onClick={runClaimCheck}
+              disabled={running}
+              className="w-full bg-blue-600 hover:bg-blue-700"
+              size="lg"
+            >
+              {running ? (
+                <>
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Running Checks...
+                </>
+              ) : (
+                <>
+                  <Play className="mr-2 h-5 w-5" />
+                  Run Claim Check
+                </>
               )}
-            </CardContent>
-          </Card>
-        </motion.div>
+            </Button>
 
-        {/* --- Weather Thresholds --- */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }}>
-          <Card className="shadow-lg">
-            <CardHeader>
-              <CardTitle>Weather Thresholds</CardTitle>
-              <CardDescription>Conditions that trigger automatic claims</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between p-3 rounded-lg bg-amber-50 border border-amber-200">
-                  <div className="flex items-center gap-3">
-                    <Droplets className="h-5 w-5 text-amber-600" />
-                    <div>
-                      <p className="font-medium text-sm">Low Rainfall</p>
-                      <p className="text-xs text-slate-600">Average over 7 days</p>
-                    </div>
-                  </div>
-                  <span className="font-bold text-amber-700">&lt; 10mm</span>
-                </div>
-
-                <div className="flex items-center justify-between p-3 rounded-lg bg-red-50 border border-red-200">
-                  <div className="flex items-center gap-3">
-                    <Thermometer className="h-5 w-5 text-red-600" />
-                    <div>
-                      <p className="font-medium text-sm">High Temperature</p>
-                      <p className="text-xs text-slate-600">Maximum temperature</p>
-                    </div>
-                  </div>
-                  <span className="font-bold text-red-700">&gt; 45°C</span>
+            {lastRun && (
+              <div className="p-4 rounded-lg bg-slate-50 border">
+                <h4 className="font-semibold text-sm text-slate-700 mb-2">
+                  Last Run
+                </h4>
+                <div className="space-y-1 text-sm">
+                  <p>
+                    <span className="text-slate-600">Status:</span>{' '}
+                    <Badge
+                      className={
+                        lastRun.success
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-red-100 text-red-800'
+                      }
+                    >
+                      {lastRun.success ? 'Success' : 'Failed'}
+                    </Badge>
+                  </p>
+                  <p>
+                    <span className="text-slate-600">Claims Created:</span>{' '}
+                    <span className="font-semibold">
+                      {lastRun.claims_created}
+                    </span>
+                  </p>
+                  <p className="text-slate-600">
+                    {format(new Date(lastRun.timestamp), 'MMM dd, yyyy HH:mm:ss')}
+                  </p>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      </div>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
 
       {/* --- Weather Table --- */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.2 }}>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.1 }}
+      >
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle>Recent Weather Observations</CardTitle>
-            <CardDescription>Latest 20 weather readings from all farms (sorted by priority)</CardDescription>
+            <CardDescription>
+              Latest 20 weather readings from all farms (sorted by priority)
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="rounded-md border">
@@ -252,9 +244,13 @@ export default function AutomationPage() {
                       const alerts = getWeatherAlert(observation);
                       return (
                         <TableRow key={observation.id}>
-                          <TableCell className="font-medium">{observation.farm_profiles.farm_name}</TableCell>
+                          <TableCell className="font-medium">
+                            {observation.farm_profiles.farm_name}
+                          </TableCell>
                           <TableCell>{observation.farm_profiles.location}</TableCell>
-                          <TableCell>{format(new Date(observation.timestamp), 'MMM dd, HH:mm')}</TableCell>
+                          <TableCell>
+                            {format(new Date(observation.timestamp), 'MMM dd, HH:mm')}
+                          </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
                               {observation.rainfall_mm < 10 ? (
@@ -283,7 +279,9 @@ export default function AutomationPage() {
                                   </Badge>
                                 ))
                               ) : (
-                                <Badge className="bg-emerald-100 text-emerald-800">Normal</Badge>
+                                <Badge className="bg-emerald-100 text-emerald-800">
+                                  Normal
+                                </Badge>
                               )}
                             </div>
                           </TableCell>
